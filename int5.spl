@@ -1,0 +1,152 @@
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13] = SP;
+
+alias userSP R0;
+userSP = SP;
+
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 - 1;
+
+alias sysCallNumber R1;
+sysCallNumber = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + (userSP - 5) % 512];
+
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = sysCallNumber;
+
+alias returnAddress R2;
+returnAddress = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + (userSP - 1) % 512;
+
+if (sysCallNumber == 2) then
+    alias i R3;
+    i = 0;
+    alias resourceTable R4;
+    resourceTable = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET;
+    while (i < 8) do
+        if ([resourceTable + i * 2 + 0] == -1) then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if (i == 16) then
+        [returnAddress] = -3;
+    else
+        alias fileName R5;
+        fileName = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + (userSP - 4) % 512];
+        alias fileTableEntry R6;
+
+        multipush(R0, R1, R2, R3, R4, R5);
+        R1 = 3;
+        R2 = fileName;
+        call FILE_MANAGER;
+        fileTableEntry = R0;
+        multipop(R0, R1, R2, R3, R4, R5);
+
+        if (fileTableEntry < 0) then
+            [returnAddress] = fileTableEntry;
+        else
+            [resourceTable + i * 2 + 0] = FILE;
+            [resourceTable + i * 2 + 1] = fileTableEntry;
+            [returnAddress] = i;
+        endif;
+    endif;
+endif;
+
+if (sysCallNumber == 3) then
+    alias fileDescriptor R3;
+    fileDescriptor = [[PTBR + 2 * ((userSP - 4)) / 512] * 512 + (userSP - 4) % 512];
+    if (fileDescriptor < 0 || fileDescriptor > 7) then
+        [returnAddress] = -1;
+    else
+        alias resourceTableEntry R4;
+        resourceTableEntry = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + fileDescriptor * 2;
+        if ([resourceTableEntry] != FILE) then
+            [returnAddress] = -1;
+        else
+            alias openFileTableEntry R5;
+            openFileTableEntry = [resourceTableEntry + 1];
+
+            multipush(R0, R1, R2, R3, R4, R5);
+            R1 = 4;
+            R2 = openFileTableEntry;
+            call FILE_MANAGER;
+            multipop(R0, R1, R2, R3, R4, R5);
+
+            [resourceTableEntry + 0] = -1;
+            [returnAddress] = 0;
+        endif;
+    endif;
+endif;
+
+if(sysCallNumber == 6) then
+	alias fileDescriptor R3;
+	fileDescriptor = [[PTBR + 2 * ((userSP - 4)) / 512] * 512 + (userSP - 4) % 512];
+	
+	if (fileDescriptor < 0 || fileDescriptor > 7) then
+		[returnAddress] = -1;
+	else
+		alias prte R4;
+		prte = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11]*512 + RESOURCE_TABLE_OFFSET;
+		
+		if ([prte + 2*fileDescriptor]!=FILE) then
+			[returnAddress] = -1;
+		else
+			alias ofte R5;
+			alias inodex R6;
+			ofte = [prte + 2*fileDescriptor + 1];
+			inodex = [OPEN_FILE_TABLE + 4*ofte];
+			multipush(R0,R1,R2,R3,R4,R5,R6);
+			R1 = 4;
+			R2 = inodex;
+			R3 = [SYSTEM_STATUS_TABLE + 1];
+			call MOD_0;
+			R7 = R0;
+			multipop(R0,R1,R2,R3,R4,R5,R6);
+			
+			if (R7 == -1) then
+				[returnAddress] = -1;
+			else
+				alias lseek R8;
+				lseek = OPEN_FILE_TABLE + ofte*4 + 2;
+				alias offset R10;
+				offset = [[PTBR + 2 * ((userSP - 3)) / 512] * 512 + (userSP - 3) % 512];
+				alias fsize R9;
+				fsize = [INODE_TABLE + inodex*16 + 2];
+				if (inodex == INODE_ROOT) then
+					fsize = 480;
+				endif;
+				if ([lseek] + offset < 0) then
+					multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+					R1 = 5;
+					R2 = inodex;
+					R3 = [SYSTEM_STATUS_TABLE + 1];
+					call MOD_0;
+					R7 = R0;
+					multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+					[returnAddress] = -2;
+					SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13];
+					[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+					ireturn;
+				else
+					if(offset == 0) then
+						[lseek] = 0;
+					else
+						if(([lseek] + offset) > fsize) then
+							[lseek] = fsize;
+						else
+							[lseek] = [lseek] + offset;
+						endif;
+					endif;
+				endif;
+				multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+				R1 = 5;
+				R2 = inodex;
+				R3 = [SYSTEM_STATUS_TABLE + 1];
+				call MOD_0;
+				multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+				[returnAddress] = 0;
+			endif;
+		endif;
+	endif;
+endif;
+
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13];
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+ireturn;

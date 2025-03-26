@@ -1,0 +1,143 @@
+alias userSP R0;
+userSP = SP;
+[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 13] = userSP;
+SP = [PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 11]*512 - 1;
+
+alias syscallnum R1;
+alias returnVal R4;
+alias fileName R2;
+alias perm R5;
+
+syscallnum = [[PTBR + 2*((userSP - 5)/512)]*512 + ((userSP-5)%512)];
+returnVal = [[PTBR + 2*((userSP - 1)/512)]*512 + ((userSP-1)%512)];
+fileName = [[PTBR + 2*((userSP - 4)/512)]*512 + ((userSP-4)%512)];
+perm = [[PTBR + 2*((userSP - 3)/512)]*512 + ((userSP-3)%512)];
+
+if(syscallnum== 1) then
+	[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 9] = 1;
+	alias i R3;
+	i =0;
+	while(i<MAX_FILE_NUM) do
+		if([INODE_TABLE + i*16 + 1] == fileName) then
+			returnVal = 0;
+			SP = [PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 13];
+			[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 9] = 0;
+			ireturn;
+		endif;
+		i = i + 1;
+	endwhile;
+	i = 0;
+	alias ientry R9;
+	while(i<MAX_FILE_NUM) do
+		if([INODE_TABLE + i*16 + 1] == -1) then
+			break;
+		endif;
+		i = i + 1;
+	endwhile;
+	if (i == 60) then
+		returnVal = -1;
+	else
+		ientry = INODE_TABLE + i*16;
+		[ientry + 1] = fileName;
+		[ientry + 2] = 0;
+		[ientry] = DATA;
+		[ientry + 3] = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 3];
+		[ientry + 4] = perm;
+		
+		[ROOT_FILE + i*8] = fileName;
+		[ROOT_FILE + i*8 + 1] = 0;
+		[ROOT_FILE + i*8 + 2] = DATA;
+		[ROOT_FILE + i * 8 + 3] = [USER_TABLE + [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 3] * 2];
+		[ROOT_FILE + i * 8 + 4] = perm;
+		returnVal = 0;
+	endif;
+endif;
+if(syscallnum== 4) then
+	[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 9] = 4;
+	alias i R3;
+	i = 0;
+	while(i<MAX_FILE_NUM) do
+		if([INODE_TABLE + i*16 + 1] == fileName) then
+			break;
+		endif;
+		i = i + 1;
+	endwhile;
+	if (i == 60) then
+		returnVal = 0;
+	else
+		alias ientry R9;
+		ientry = INODE_TABLE + i*16;
+		if([ientry]!=DATA) then
+			returnVal = -1;
+		else
+			if ([ientry + 4] == EXCLUSIVE && [SYSTEM_STATUS_TABLE + 0] != 1 && [ientry + 3] != [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 3]) then
+				returnVal = -1;
+			else
+				multipush(R0,R1,R2,R3,R4,R5);
+				R1 = 4;
+				R2 = i;
+				R3 = [SYSTEM_STATUS_TABLE + 1];
+				call MOD_0;
+				multipop(R0,R1,R2,R3,R4,R5);
+				
+				if ([FILE_STATUS_TABLE + i * 4 + 1] != -1) then // file is open
+				multipush(R0,R1,R2,R3,R4,R5);
+				R1 = 5;
+				R2 = i;
+				R3 = [SYSTEM_STATUS_TABLE + 1];
+				call MOD_0;			
+				multipop(R0,R1,R2,R3,R4,R5);
+				returnVal = -2;
+				else
+					alias j R6;
+					j = 0;
+					while(j < 4) do
+						if([ientry + 8 + j] == -1) then
+							break;
+						endif;
+						
+						alias bufferIndex R7;
+						bufferIndex = [ientry + 8 + j] % MAX_BUFFER;
+						if ([BUFFER_TABLE + bufferIndex * 4 + 0] == [ientry + 8 + j] && [BUFFER_TABLE + bufferIndex * 4 + 1] == 1) then
+							[BUFFER_TABLE + bufferIndex * 4 + 1] = 0;
+						endif;
+						multipush(R0,R1,R2,R3,R4,R5,R6,R7);
+						R1 = 4;
+						R2 = [ientry + 8 + j];
+						R3 = [SYSTEM_STATUS_TABLE + 1];
+						call MOD_2;
+						multipop(R0,R1,R2,R3,R4,R5,R6,R7);
+						j = j + 1;
+					endwhile;
+					alias inodePages R8;
+					inodePages = ientry;
+					j = inodePages + 16;
+					while (inodePages < j) do
+					    [inodePages] = -1;
+					    inodePages = inodePages + 1;
+					endwhile;
+
+					alias rootFile R8;
+					rootFile = ROOT_FILE + 8 * i;
+					j = rootFile + 8;
+					while (rootFile < j) do
+					    [rootFile] = -1;
+					    rootFile = rootFile + 1;
+					endwhile;
+
+					multipush(R4);
+					R1 = 5;
+					R2 = i;
+					R3 = [SYSTEM_STATUS_TABLE + 1];
+					call MOD_0;
+					multipop(R4);
+					returnVal = 0;
+				endif;	
+				
+			endif;
+		endif;
+	endif;
+endif;
+SP = [PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 13];
+[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 9] = 0;
+ireturn;

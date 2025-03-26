@@ -1,0 +1,116 @@
+alias userSP R0;
+userSP = SP;
+[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 13] = SP;
+
+[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 9] = 5;
+SP = [PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 11]*512 - 1;
+
+alias fdesc R1; 
+fdesc = [[PTBR + 2*((userSP - 4)/512)]*512 + (userSP - 4)%512];
+
+alias pte R5;
+pte = PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1];
+
+alias retv R2;
+retv = [PTBR + 2*((userSP - 1)/512)]*512 + (userSP - 1)%512;
+
+if(fdesc == -2) then
+	multipush(R0,R1,R2,R5);
+	R1 = 3;
+	R2 = [SYSTEM_STATUS_TABLE + 1];
+	R3 = [[PTBR + 2*((userSP - 3)/512)]*512 + (userSP - 3)%512];
+	call MOD_4;
+	multipop(R0,R1,R2,R5);
+	[retv] = 0;
+else
+	if(fdesc < 0 || fdesc > 7) then
+		[retv] = -1;
+	else
+		alias pprt R3;
+		pprt = [pte + 11]*512 + RESOURCE_TABLE_OFFSET;
+		
+		if([pprt + 2*fdesc] != FILE) then
+			[retv] = -1;
+		else
+			alias opentry R4;
+			opentry = [pprt + 2*fdesc + 1];
+			alias inodex R5;
+			inodex = [OPEN_FILE_TABLE + opentry*4];
+			
+			if([INODE_TABLE + inodex*16 + 3] != [pte + 3] && [pte + 3]!= 1 && [INODE_TABLE + inodex*16 + 4] == EXCLUSIVE) then
+				[retv] = -3;
+			else
+			
+				multipush(R0,R1,R2,R3,R4,R5);
+				R2 = inodex;
+				R1 = 4;
+				R3 = [SYSTEM_STATUS_TABLE + 1];
+				call MOD_0;
+				R6 = R0;
+				multipop(R0,R1,R2,R3,R4,R5);
+				
+				if(R6 < 0) then
+					[retv] = -1;
+				else
+					alias lseek R6;
+					lseek = [OPEN_FILE_TABLE + 4*opentry + 2];
+					if(lseek == MAX_FILE_SIZE) then
+						[retv] = -2;
+					else
+						if(lseek%512 == 0 && lseek == [INODE_TABLE + inodex*16 + 2]) then
+							multipush(R0,R1,R2,R3,R4,R5,R6);
+							R1 = 3;
+							call MOD_2;
+							R7 = R0;
+							multipop(R0,R1,R2,R3,R4,R5,R6);
+							
+							if(R7 == -1) then
+								[retv] = -2;
+								multipush(R0,R1,R2,R3,R4,R5,R6);
+								R2 = inodex;
+								R1 = 5;
+								R3 = [SYSTEM_STATUS_TABLE + 1];
+								call MOD_0;
+								multipop(R0,R1,R2,R3,R4,R5,R6);
+								SP = [PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 13];
+								[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 9] = 0;
+								ireturn;
+							else
+								[INODE_TABLE + inodex*16 + 8 + (lseek/512)] = R7;
+							endif;
+						endif;
+						
+						alias blocknumber R7;
+						blocknumber = [INODE_TABLE + inodex*16 + 8 + (lseek/512)];
+						
+						multipush(R0,R1,R2,R3,R4,R5,R6,R7);
+						R2 = blocknumber;
+						R3 = lseek%512;
+						R1 = 1;
+						R4 = [[PTBR + 2*((userSP - 3)/512)]*512 + (userSP - 3)%512];
+						call MOD_3;
+						multipop(R0,R1,R2,R3,R4,R5,R6,R7);
+						
+						if (lseek == [INODE_TABLE + 16 * inodex + 2]) then
+							[INODE_TABLE + 16 * inodex + 2] = [INODE_TABLE + 16 * inodex + 2] + 1;
+							[ROOT_FILE + 8*inodex + 1] = [ROOT_FILE + 8*inodex + 1] + 1;
+    						endif;
+
+						[OPEN_FILE_TABLE + 4 * opentry + 2] = [OPEN_FILE_TABLE + 4 * opentry + 2] + 1;
+						[retv] = 0;
+					endif;
+					multipush(R0,R1,R2,R3,R4,R5,R6);
+					R2 = inodex;
+					R1 = 5;
+					R3 = [SYSTEM_STATUS_TABLE + 1];
+					call MOD_0;
+					multipop(R0,R1,R2,R3,R4,R5,R6);				
+				endif;
+			endif;
+		endif;
+	endif;
+endif;
+
+SP = [PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 13];
+[PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE + 1] + 9] = 0;
+ireturn;
